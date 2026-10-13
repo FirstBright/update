@@ -18,8 +18,8 @@ Keep `korail_credentials.txt` private. The example file contains empty settings 
 2. Double-click `3_업데이트.bat` and follow the message.
 3. Start `2_실행.bat` again.
 
-If you use Bash, run `bash update.sh` instead. Windows users do not need Git or
-Bash: the BAT file uses the Python installed by `1_설치.bat`.
+No shell script or Git installation is needed. The BAT file uses the Python
+installed by `1_설치.bat` to download and safely replace app files.
 
 The updater downloads the latest `main` commit from `FirstBright/update`, compares
 file contents, and replaces only changed files from its explicit app-file list.

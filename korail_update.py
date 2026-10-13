@@ -18,7 +18,7 @@ import zipfile
 REPOSITORY = "FirstBright/update"
 # Never replace credentials, maintainer scripts, Git settings, or environments.
 APP_FILES = (
-    "README.md", "update.sh", "3_업데이트.bat", "korail_update.py",
+    "README.md", "3_업데이트.bat", "korail_update.py",
     "1_설치.bat", "2_실행.bat", "requirements.txt",
     "korail_credentials.example.txt", "app.py", "korail_check.py",
     "korail_common.py", "korail_desktop_alert.py", "korail_notify.py",
