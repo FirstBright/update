@@ -22,6 +22,8 @@ import subprocess
 import sys
 import time
 
+import httpx
+
 from korail_common import build_client_config, load_credentials
 from korail_desktop_alert import launch_alert
 from korail_notify import PRIORITY_DEFAULT, PRIORITY_URGENT, notify
@@ -36,10 +38,13 @@ from korail_mobile_api import (
     KorailSeatUnavailableError,
     KorailSessionExpiredError,
     KorailSoldOutError,
+    KorailTransportError,
     TrainSearchQuery,
 )
 
 MIN_POLL_INTERVAL_SECONDS = 5
+MAX_SEARCH_NETWORK_RETRIES = 5
+MAX_SEARCH_RETRY_DELAY_SECONDS = 60
 SHUTDOWN_DELAY_SECONDS = 300
 
 
@@ -230,6 +235,8 @@ def _run(args: argparse.Namespace) -> int:
         found = None
         hold = None
         attempt = 0
+        network_failures = 0
+        last_network_error = None
         while time.monotonic() < deadline:
             attempt += 1
 
@@ -262,6 +269,8 @@ def _run(args: argparse.Namespace) -> int:
                     if not candidates:
                         return _no_trains(args)
                     found = _pick_train(candidates, seat_class, args.time_to, args.allowed_codes)
+                    network_failures = 0
+                    last_network_error = None
                     if found is None and attempt == 1:
                         print(f"Search returned {len(candidates)} trains. First 20 statuses:")
                         for train in candidates[:20]:
@@ -279,6 +288,30 @@ def _run(args: argparse.Namespace) -> int:
                     print("Session expired mid-poll, logging back in...")
                     client.clear_session()
                     client.login(member_id, password)
+                    continue
+                except KorailTransportError as exc:
+                    # Retry only network failures during reads. HTTP error responses
+                    # and reservation mutations must not be blindly retried.
+                    if not isinstance(exc.__cause__, httpx.TransportError):
+                        raise
+                    network_failures += 1
+                    last_network_error = exc
+                    remaining = deadline - time.monotonic()
+                    if network_failures > MAX_SEARCH_NETWORK_RETRIES or remaining <= 0:
+                        print("Search stopped: network recovery limit reached. This is not a no-seat result.", flush=True)
+                        raise
+                    delay = min(
+                        args.poll_interval * 2 ** (network_failures - 1),
+                        MAX_SEARCH_RETRY_DELAY_SECONDS,
+                        remaining,
+                    )
+                    print(
+                        f"[{attempt}] Search network error ({type(exc.__cause__).__name__}); "
+                        f"retry {network_failures}/{MAX_SEARCH_NETWORK_RETRIES} in {delay:g}s. "
+                        "Seat availability is unknown.",
+                        flush=True,
+                    )
+                    time.sleep(delay)
                     continue
                 except KorailApiError as exc:
                     print(
@@ -328,6 +361,9 @@ def _run(args: argparse.Namespace) -> int:
                 continue
 
         if hold is None:
+            if last_network_error is not None:
+                print("Search stopped: --max-wait elapsed during a network failure. This is not a no-seat result.", flush=True)
+                raise last_network_error
             _ui_result("timeout", route=_route(args))
             print("Gave up: no bookable train appeared in the requested window before --max-wait elapsed.")
             notify(
