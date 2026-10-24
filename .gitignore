@@ -1,0 +1,25 @@
+# Local settings and secrets
+3_GitHub_upload.bat
+.korail-version
+.korail-update.lock
+korail_credentials.txt
+.env
+.env.*
+*.pem
+*.key
+.aws/
+.codex/
+.agents/
+
+# Generated and local-only files
+tmp/
+output/
+.venv/
+venv/
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.log
+*.zip
+.DS_Store
+Thumbs.db
