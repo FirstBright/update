@@ -121,7 +121,6 @@ def parse_args() -> argparse.Namespace:
     return parser.parse_args()
 
 
-KORAIL_URL = "https://www.letskorail.com/"
 
 # SetThreadExecutionState flags: keep the system awake while this process runs.
 # Windows drops the request automatically when the process exits.
@@ -403,11 +402,9 @@ def _run(args: argparse.Namespace) -> int:
             "현재 미결제 예약입니다. 기한 내 결제하지 않으면 자동 취소됩니다.\n\n"
             f"{_route(args)} 열차 {found.train_no}\n"
             f"{_hhmm(found.departure_time)} 출발 → {_hhmm(found.arrival_time)} 도착 · 성인 {args.adults}명\n"
-            f"예약번호: {hold.pnr_no} · 금액: {hold.total_fare}원\n"
-            "알림을 누르면 코레일 웹사이트가 열립니다.",
+            f"예약번호: {hold.pnr_no}",
             priority=PRIORITY_URGENT,
             tags=["tada", "train"],
-            click=KORAIL_URL,
         )
         if not notified:
             print("[알림 경고] 예약은 성공했지만 모바일 알림을 보내지 못했습니다. 코레일 앱에서 결제하세요.")
