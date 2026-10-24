@@ -11,6 +11,8 @@ from pathlib import Path
 from korail_mobile_api import KorailConfig
 
 CREDENTIALS_FILE = Path(__file__).parent / "korail_credentials.txt"
+# Shared by everyone the maintainer sends the zip to (Telegram bot token); never in git.
+BOT_FILE = Path(__file__).parent / "korail_bot.txt"
 NEW_FILE_HEADER = (
     "# 코레일 자동예매 프로그램이 관리하는 파일입니다. 다른 사람과 공유하지 마세요.",
     "# Keep this file private: anyone who can read it can log into your KORAIL account.",
@@ -30,11 +32,12 @@ def build_client_config(enable_dynapath: bool = True) -> KorailConfig:
     return replace(config, dynapath=replace(config.dynapath, token_settings=settings))
 
 
-def _load_file() -> dict[str, str]:
-    if not CREDENTIALS_FILE.exists():
+def _load_file(path: Path | None = None) -> dict[str, str]:
+    path = path or CREDENTIALS_FILE
+    if not path.exists():
         return {}
     values: dict[str, str] = {}
-    for line in CREDENTIALS_FILE.read_text(encoding="utf-8-sig").splitlines():
+    for line in path.read_text(encoding="utf-8-sig").splitlines():
         line = line.strip()
         if not line or line.startswith("#") or "=" not in line:
             continue
@@ -44,8 +47,8 @@ def _load_file() -> dict[str, str]:
 
 
 def load_setting(key: str) -> str | None:
-    """Read an optional setting: env var first, then korail_credentials.txt."""
-    return os.environ.get(key) or _load_file().get(key) or None
+    """Read an optional setting: env var, korail_credentials.txt, then korail_bot.txt."""
+    return os.environ.get(key) or _load_file().get(key) or _load_file(BOT_FILE).get(key) or None
 
 
 def load_saved_credentials() -> tuple[str, str]:

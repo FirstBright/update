@@ -23,8 +23,10 @@ This can't change yet, so today every person runs the app on their own PC:
 
 - `코레일_실행.bat` installs, updates and runs the app.
 - Korail ID/password are entered in the app and saved in `korail_credentials.txt`.
-- **Phone alerts already work per person**: the app creates a random ntfy topic
-  for each PC and shows a QR code. The person subscribes to it in the ntfy app.
+- **Phone alerts already work per person** through one shared **Telegram bot**:
+  the person scans a QR code and presses Start, and their chat is saved on their
+  PC. No typing, no extra app (Telegram uses normal phone push, so no extra
+  battery). ntfy is an optional second channel.
 
 ## Already shaped for the server
 
@@ -33,18 +35,19 @@ These parts can be reused on the server without rewriting:
 | Piece | How the server reuses it |
 |---|---|
 | `korail_reserve.py` | Container entrypoint as-is. Input: CLI args (`--dep --arr --date --time-from --time-to --adults --seat-class --poll-interval --max-wait [--live]`). Credentials: env `KORAIL_ID` / `KORAIL_PASSWORD` (never args). Output: one stdout line `KORAIL_RESULT:{json}` with `status` = `reserved` / `preview` / `timeout` / `no_trains`. Exit code 0 = success, 1 = failure. |
-| `korail_notify.py` | Sends to `NTFY_SERVER` + `NTFY_TOPIC`. Self-host ntfy on the VM and change only `NTFY_SERVER`. |
-| Per-person ntfy topic | Each companion's phone is already subscribed to their own topic, so the server can message the same topic. |
+| `korail_notify.py` | `notify()` sends to Telegram (`TELEGRAM_CHAT_ID`) and/or ntfy. The server calls the same function. |
+| Telegram bot + chat IDs | The server uses the **same bot token** and each person's saved chat ID, so phones need no new setup. The bot can also become the request channel (step 3). |
 
 ## Steps
 
 1. **Done:** PC app with one launcher, login screen, and per-person phone alerts.
-2. **Self-host ntfy** on the Ubuntu VM (Docker image `binwiederhier/ntfy`).
-   Set `NTFY_SERVER=https://<server>` in each PC's `korail_credentials.txt`.
-   Phones re-subscribe once to the new server.
-3. **Simple server mode (the target above):** a small web form on the VM where a
-   person enters route/date/time. The server watches for seats and alerts that
-   person's ntfy topic. No booking, so no need to store their Korail password.
+2. **Move the bot to the server:** the VM runs the Telegram bot itself
+   (long polling, so no public port or domain is needed). PCs then stop reading
+   bot updates.
+3. **Simple server mode (the target above):** a person messages the bot or uses a
+   small web form with route/date/time. The server watches for seats and replies
+   in that person's Telegram chat. No booking, so no need to store their Korail
+   password.
 4. **Containers for booking:** for each request run
    `docker run --rm -e KORAIL_ID -e KORAIL_PASSWORD korail-reserve <args>`,
    read the `KORAIL_RESULT` line, and alert the person. Limit how many run at
@@ -62,5 +65,8 @@ These parts can be reused on the server without rewriting:
   random per container.
 - **Payment:** a reservation holds the seat, but payment still happens in the
   Korail app before the deadline. Alerts must say that clearly.
-- **Remote access:** phones need to reach ntfy from outside the home
-  (port forwarding, Tailscale or Cloudflare Tunnel).
+- **Remote access:** Telegram needs none (the server polls Telegram). Only the
+  website or a self-hosted ntfy would need port forwarding, Tailscale or a
+  Cloudflare Tunnel.
+- **Bot token is shared** in the zip: anyone with it can send as the bot. If it
+  leaks, `/revoke` it in @BotFather and send a new `korail_bot.txt`.

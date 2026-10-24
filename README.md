@@ -19,11 +19,23 @@ Source repository: https://github.com/FirstBright/update
 Keep `korail_credentials.txt` private. Anyone who can read it can log into your
 Korail account. If this folder is inside OneDrive/Dropbox, the file is synced too.
 
-## Phone alerts
+## Phone alerts (Telegram, ntfy optional)
 
-Open "📱 휴대폰 알림 설정" in the app. Install the **ntfy** app on the phone,
-scan the QR code (or type the topic), and press "테스트 알림 보내기".
-Each PC gets its own random topic, so each person only sees their own alerts.
+Open "📱 휴대폰 알림 설정" in the app, scan the QR code with the phone camera,
+press **시작(Start)** in Telegram, then press **연결 확인**. Nothing to type.
+Each person's phone is linked to their own PC; others never see their alerts.
+The optional "ntfy 앱으로도 받기" button adds ntfy as a second channel.
+
+### Maintainer: one-time bot setup
+
+1. In Telegram, message **@BotFather** → `/newbot` → pick a name. Copy the token.
+2. Create `korail_bot.txt` in the app folder with one line:
+   `TELEGRAM_BOT_TOKEN=<token>`
+3. Ship it inside the zip, never in git (it's in `.gitignore`; the repo is public):
+   `git archive -o ..\korail.zip --add-file=korail_bot.txt HEAD`
+
+Anyone with the token can send messages as the bot, so only share the zip with
+people you trust. If it leaks, use `/revoke` in @BotFather and send a new file.
 
 See `ROADMAP.md` for the plan to move this to a home server.
 

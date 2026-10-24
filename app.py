@@ -8,7 +8,9 @@ import segno
 import streamlit as st
 import os
 from korail_common import load_saved_credentials, load_setting, save_credentials, save_settings
-from korail_notify import DEFAULT_SERVER, notify
+from korail_notify import (
+    DEFAULT_SERVER, find_telegram_chat, notify, telegram_api, telegram_link_code, telegram_start_link,
+)
 from korail_result_ui import show_result
 
 env = os.environ.copy()
@@ -69,35 +71,83 @@ if _change_col.button("계정 변경", use_container_width=True):
     st.session_state["edit_credentials"] = True
     st.rerun()
 
-# Each person gets their own random ntfy topic; the phone subscribes to it once.
+def _qr_png(url: str) -> bytes:
+    buffer = io.BytesIO()
+    segno.make(url).save(buffer, kind="png", scale=5)
+    return buffer.getvalue()
+
+
+_telegram_ready = bool(load_setting("TELEGRAM_BOT_TOKEN"))
+_telegram_chat = load_setting("TELEGRAM_CHAT_ID")
 _ntfy_topic = load_setting("NTFY_TOPIC")
-if not _ntfy_topic:
-    _ntfy_topic = f"korail-{secrets.token_hex(8)}"
-    try:
-        save_settings({"NTFY_TOPIC": _ntfy_topic})
-        st.session_state["ntfy_new"] = True
-    except OSError:
-        _ntfy_topic = None
-if _ntfy_topic:
-    _ntfy_url = f"{(load_setting('NTFY_SERVER') or DEFAULT_SERVER).rstrip('/')}/{_ntfy_topic}"
-    with st.expander("📱 휴대폰 알림 설정 (예약되면 휴대폰으로 알려줍니다)",
-                     expanded=st.session_state.get("ntfy_new", False)):
+_alert_ready = bool(_telegram_chat or _ntfy_topic)
+with st.expander(
+    "📱 휴대폰 알림 (연결됨)" if _alert_ready else "📱 휴대폰 알림 설정 · 예약되면 휴대폰으로 알려줍니다",
+    expanded=not _alert_ready and _telegram_ready,
+):
+    st.markdown("**텔레그램**")
+    if _telegram_chat:
+        st.success("텔레그램이 연결되어 있습니다.")
+        if st.button("텔레그램 연결 해제"):
+            save_settings({"TELEGRAM_CHAT_ID": None})
+            st.rerun()
+    elif not _telegram_ready:
+        st.info("텔레그램 알림을 쓰려면 관리자에게 받은 korail_bot.txt 파일을 이 폴더에 넣어주세요.")
+    else:
+        if "telegram_link" not in st.session_state:
+            st.session_state["telegram_code"] = telegram_link_code()
+            try:
+                st.session_state["telegram_link"] = telegram_start_link(st.session_state["telegram_code"])
+            except Exception as error:
+                st.session_state["telegram_link"] = None
+                st.error(f"텔레그램에 연결하지 못했습니다: {error}")
+        _link = st.session_state["telegram_link"]
+        if _link:
+            _qr_col, _steps_col = st.columns([1, 2])
+            _qr_col.image(_qr_png(_link))
+            _steps_col.markdown(
+                "1. 휴대폰 카메라로 왼쪽 QR 코드를 찍습니다.\n"
+                "2. 텔레그램이 열리면 아래쪽 **시작(Start)** 을 누릅니다.\n"
+                "3. 이 화면에서 **연결 확인** 을 누릅니다."
+            )
+            _steps_col.link_button("PC에서 텔레그램 열기", _link)
+            if _steps_col.button("연결 확인", type="primary"):
+                try:
+                    _chat = find_telegram_chat(st.session_state["telegram_code"])
+                except Exception as error:
+                    _steps_col.error(f"확인하지 못했습니다: {error}")
+                    _chat = None
+                if _chat is not None:
+                    save_settings({"TELEGRAM_CHAT_ID": str(_chat)})
+                    try:
+                        telegram_api("sendMessage", {"chat_id": _chat, "text": "✅ 코레일 자동예매 알림이 연결되었습니다."})
+                    except Exception:
+                        pass
+                    st.session_state.pop("telegram_link")
+                    st.rerun()
+                else:
+                    _steps_col.warning("아직 확인되지 않았습니다. 텔레그램에서 '시작'을 눌렀는지 확인한 뒤 다시 눌러주세요.")
+
+    st.markdown("**ntfy 앱 (선택)**")
+    if _ntfy_topic:
+        _ntfy_url = f"{(load_setting('NTFY_SERVER') or DEFAULT_SERVER).rstrip('/')}/{_ntfy_topic}"
         _qr_col, _steps_col = st.columns([1, 2])
-        _qr = io.BytesIO()
-        segno.make(_ntfy_url).save(_qr, kind="png", scale=5)
-        _qr_col.image(_qr.getvalue())
-        _steps_col.markdown(
-            "1. 휴대폰에 **ntfy** 앱을 설치합니다 (Play 스토어 / App Store).\n"
-            "2. 휴대폰 카메라로 왼쪽 QR 코드를 찍거나, 앱에서 **+** 를 눌러 아래 토픽을 입력합니다.\n"
-            "3. 아래 **테스트 알림** 버튼을 눌러 휴대폰에 알림이 오는지 확인합니다."
-        )
+        _qr_col.image(_qr_png(_ntfy_url))
+        _steps_col.markdown("ntfy 앱에서 QR 코드를 찍거나 **+** 를 눌러 아래 토픽을 구독합니다.")
         _steps_col.code(_ntfy_topic, language=None)
-        if _steps_col.button("테스트 알림 보내기"):
-            if notify("🧪 알림 테스트 · 실제 예약 아님", "알림이 정상적으로 도착했습니다.", tags=["test_tube"]):
-                _steps_col.success("보냈습니다. 휴대폰을 확인해주세요.")
-            else:
-                _steps_col.error("알림을 보내지 못했습니다. 인터넷 연결을 확인해주세요.")
-        st.caption("이 토픽 이름을 아는 사람은 알림을 볼 수 있으니 다른 사람과 공유하지 마세요.")
+        if _steps_col.button("ntfy 사용 안 함"):
+            save_settings({"NTFY_TOPIC": None})
+            st.rerun()
+    elif st.button("ntfy 앱으로도 받기"):
+        # Random topic: anyone who knows the name can read it.
+        save_settings({"NTFY_TOPIC": f"korail-{secrets.token_hex(8)}"})
+        st.rerun()
+
+    if _alert_ready and st.button("테스트 알림 보내기"):
+        if notify("🧪 알림 테스트 · 실제 예약 아님", "알림이 정상적으로 도착했습니다.", tags=["test_tube"]):
+            st.success("보냈습니다. 휴대폰을 확인해주세요.")
+        else:
+            st.error("알림을 보내지 못했습니다. 인터넷 연결을 확인해주세요.")
 
 QUICK_DESTINATIONS = ["익산", "순천"]
 station_options = ["동탄", "익산", "나주","서울",  "동대구", "부산",  "대전", "수서", "광주송정"]

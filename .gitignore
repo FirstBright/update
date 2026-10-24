@@ -3,6 +3,7 @@
 .korail-version
 .korail-update.lock
 korail_credentials.txt
+korail_bot.txt
 .env
 .env.*
 *.pem
