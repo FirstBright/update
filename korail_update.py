@@ -22,6 +22,7 @@ APP_FILES = (
     "README.md",
     "ROADMAP.md",
     "코레일_실행.bat",
+    "코레일_실행_mac.command",
     "korail_launcher.py",
     "korail_update.py",
     "requirements.txt",
@@ -124,6 +125,9 @@ def install_files(root: Path, files: dict[str, bytes], commit: str) -> tuple[int
         staged = Path(work)
         for name, data in replacements.items():
             (staged / name).write_bytes(data)
+            if name.endswith(".command"):
+                # macOS only runs a double-clicked .command file that is executable.
+                os.chmod(staged / name, 0o755)
         installed = []
         try:
             for name in replacements:

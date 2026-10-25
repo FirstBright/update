@@ -16,6 +16,16 @@ Source repository: https://github.com/FirstBright/update
    in this folder, so you never have to type them again. Use "계정 변경" to
    change them; if login fails, the form appears again automatically.
 
+### Mac
+
+Double-click `코레일_실행_mac.command` instead. It does the same steps
+(Python 3.10+ from python.org is installed if missing) and keeps the Mac awake
+while the app runs. The first time, macOS may block it as "unidentified
+developer": right-click the file → **열기(Open)** → **열기**. If it says the
+file can't be run, open Terminal in the folder and run
+`chmod +x 코레일_실행_mac.command` once. Pop-up desktop alerts are Windows-only;
+use phone alerts on a Mac.
+
 Keep `korail_credentials.txt` private. Anyone who can read it can log into your
 Korail account. If this folder is inside OneDrive/Dropbox, the file is synced too.
 
