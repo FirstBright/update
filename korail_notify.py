@@ -21,16 +21,25 @@ from __future__ import annotations
 import argparse
 import json
 import secrets
+import ssl
 import sys
 import urllib.error
 import urllib.parse
 import urllib.request
+
+import certifi
 
 from korail_common import load_setting
 
 DEFAULT_SERVER = "https://ntfy.sh"
 TELEGRAM_API = "https://api.telegram.org"
 TIMEOUT_SECONDS = 10
+
+# Windows adds some root certificates to its store only when a Windows program
+# first needs them, so Python may not see e.g. Telegram's GoDaddy root yet
+# ("self-signed certificate in certificate chain"). Trust certifi's roots as well.
+SSL_CONTEXT = ssl.create_default_context()
+SSL_CONTEXT.load_verify_locations(certifi.where())
 
 # ntfy priorities: 1=min, 2=low, 3=default, 4=high, 5=urgent
 PRIORITY_DEFAULT = 3
@@ -92,7 +101,7 @@ def _notify_ntfy(
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS, context=SSL_CONTEXT) as response:
             response.read()
         return True
     except Exception as exc:  # never let a notification break the caller
@@ -112,7 +121,7 @@ def telegram_api(method: str, params: dict) -> object:
         method="POST",
     )
     try:
-        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS) as response:
+        with urllib.request.urlopen(request, timeout=TIMEOUT_SECONDS, context=SSL_CONTEXT) as response:
             body = json.loads(response.read())
     except urllib.error.HTTPError as error:
         # Don't let the token-bearing URL end up in logs.
