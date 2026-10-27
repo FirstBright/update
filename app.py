@@ -179,6 +179,8 @@ with col2:
     arr = st.text_input("도착지 직접 입력", value="") if arr_choice == CUSTOM_OPTION else arr_choice
 
 travel_date = st.date_input("탑승일", value=datetime.date.today() + datetime.timedelta(days=1))
+# 도착역은 처음에 비어 있어(index=None) 선택 전에는 None이 들어옵니다.
+dep, arr = (dep or "").strip(), (arr or "").strip()
 reserve_dep, reserve_arr = dep, arr
 reserve_date_str = travel_date.strftime("%Y%m%d")
 
@@ -225,7 +227,7 @@ if shutdown_after and live_mode:
     st.caption("종료를 취소하려면 PC에서 Win+R → `shutdown /a` 입력")
 
 if st.button("모니터링 및 자동 예매 시작", type="primary", disabled=invalid_time_range):
-    if not dep.strip() or not arr.strip() or dep.strip() == arr.strip():
+    if not dep or not arr or dep == arr:
         st.error("서로 다른 출발역과 도착역을 입력해주세요.")
         st.stop()
     st.session_state.pop("reservation_result", None)
