@@ -20,7 +20,7 @@ set "PYARGS="
 
 where py >nul 2>nul
 if %errorlevel%==0 (
-    py -3 --version >nul 2>nul
+    py -3 -c "import sys; sys.exit(sys.version_info < (3, 11))" >nul 2>nul
     if !errorlevel!==0 (
         set "PYCMD=py"
         set "PYARGS=-3"
@@ -31,7 +31,7 @@ if %errorlevel%==0 (
 for /f "delims=" %%P in ('where python 2^>nul') do (
     echo %%P | findstr /i "WindowsApps" >nul
     if errorlevel 1 (
-        "%%P" --version >nul 2>nul
+        "%%P" -c "import sys; sys.exit(sys.version_info < (3, 11))" >nul 2>nul
         if !errorlevel!==0 (
             set "PYCMD=%%P"
             set "PYARGS="

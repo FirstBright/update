@@ -25,8 +25,8 @@ find_python() {
         /opt/homebrew/bin/python3 /usr/local/bin/python3 \
         "$(command -v python3 2>/dev/null)"; do
         [ -x "$candidate" ] || continue
-        # tempfile(ignore_cleanup_errors=) in korail_update.py needs 3.10+.
-        if "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then
+        # pykorail needs Python 3.11+.
+        if "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null; then
             PYCMD="$candidate"
             return 0
         fi
@@ -38,7 +38,7 @@ if [ ! -x ".venv/bin/python" ]; then
     echo "처음 실행이라 설치를 진행합니다. (인터넷 연결이 필요합니다)"
     echo
     if ! find_python; then
-        echo "Python 3.10 이상이 설치되어 있지 않습니다. 설치 파일을 내려받습니다..."
+        echo "Python 3.11 이상이 설치되어 있지 않습니다. 설치 파일을 내려받습니다..."
         installer="${TMPDIR:-/tmp}/python-$PY_VERSION-macos11.pkg"
         if ! curl -fL -o "$installer" "https://www.python.org/ftp/python/$PY_VERSION/python-$PY_VERSION-macos11.pkg"; then
             echo

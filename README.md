@@ -1,6 +1,6 @@
 # Korail app
 
-Windows Streamlit app using `korail-mobile-api`.
+Windows Streamlit app using [`pykorail`](https://github.com/devgyurak/pykorail).
 Source repository: https://github.com/FirstBright/update
 
 ## For users
@@ -19,7 +19,7 @@ Source repository: https://github.com/FirstBright/update
 ### Mac
 
 Double-click `코레일_실행_mac.command` instead. It does the same steps
-(Python 3.10+ from python.org is installed if missing) and keeps the Mac awake
+(Python 3.11+ from python.org is installed if missing) and keeps the Mac awake
 while the app runs. The first time, macOS may block it as "unidentified
 developer": right-click the file → **열기(Open)** → **열기**. If it says the
 file can't be run, open Terminal in the folder and run

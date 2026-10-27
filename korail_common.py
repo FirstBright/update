@@ -5,10 +5,10 @@ from __future__ import annotations
 import getpass
 import os
 import re
-from dataclasses import replace
 from pathlib import Path
 
-from korail_mobile_api import KorailConfig
+import pykorail.transport
+from pykorail import Korail
 
 CREDENTIALS_FILE = Path(__file__).parent / "korail_credentials.txt"
 # Shared by everyone the maintainer sends the zip to (Telegram bot token); never in git.
@@ -18,18 +18,47 @@ NEW_FILE_HEADER = (
     "# Keep this file private: anyone who can read it can log into your KORAIL account.",
 )
 
-def build_client_config(enable_dynapath: bool = True) -> KorailConfig:
-    """Keep default settings, optionally overriding only the Android ID."""
-    if not enable_dynapath:
-        return KorailConfig(disable_dynapath=True)
-    config = KorailConfig()
+_resolve_ca_bundle = pykorail.transport.resolve_ca_bundle
+
+
+def _ascii_ca_bundle() -> str | None:
+    """pykorail's CA bundle, copied to an ASCII-only path if needed.
+
+    libcurl (curl_cffi) on Windows can't open a CA file whose path has non-ASCII
+    characters, e.g. an app folder under "바탕 화면": every HTTPS request then
+    fails with curl error 77.
+    """
+    ca_path = _resolve_ca_bundle()
+    if ca_path is None or ca_path.isascii():
+        return ca_path
+    data = Path(ca_path).read_bytes()
+    for base in (os.environ.get("ProgramData"), os.environ.get("PUBLIC")):
+        if not base or not base.isascii():
+            continue
+        target = Path(base) / "korail_mine" / "cacert.pem"
+        try:
+            if not target.is_file() or target.read_bytes() != data:
+                target.parent.mkdir(parents=True, exist_ok=True)
+                temp = target.with_name(f"cacert.{os.getpid()}.tmp")
+                temp.write_bytes(data)
+                os.replace(temp, target)
+        except OSError:
+            continue
+        return str(target)
+    return ca_path
+
+
+pykorail.transport.resolve_ca_bundle = _ascii_ca_bundle
+
+
+def build_client() -> Korail:
+    """Create a client, optionally pinning the device's Android ID (16 hex chars)."""
     device_id = os.environ.get("KORAIL_DYNAPATH_DEVICE_ID")
     if device_id is None:
-        return config
+        return Korail()
     if not re.fullmatch(r"[0-9a-fA-F]{16}", device_id):
         raise ValueError("KORAIL_DYNAPATH_DEVICE_ID must contain exactly 16 hex characters")
-    settings = replace(config.dynapath.token_settings, device_id=device_id.lower())
-    return replace(config, dynapath=replace(config.dynapath, token_settings=settings))
+    return Korail(android_id=device_id.lower())
 
 
 def _load_file(path: Path | None = None) -> dict[str, str]:
