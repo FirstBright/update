@@ -1,6 +1,6 @@
 """
 Poll KORAIL for an available train in a date/time window and reserve it
-(hold only — does NOT pay). Uses pykorail.
+(hold only — does NOT pay). Uses korail-api.
 
 Credentials come from (in order): --id/--password CLI args, KORAIL_ID /
 KORAIL_PASSWORD env vars, korail_credentials.txt, or an interactive prompt.
@@ -26,16 +26,19 @@ from datetime import datetime, timedelta, timezone
 from korail_common import build_client, load_credentials
 from korail_desktop_alert import launch_alert
 from korail_notify import PRIORITY_DEFAULT, PRIORITY_URGENT, notify
-from pykorail import (
-    AdultPassenger,
-    LoginFailedError,
-    NeedToLoginError,
-    NoResultsError,
-    PastDepartureError,
-    PykorailError,
-    ReserveOption,
-    SoldOutError,
+from korail_api import (
+    KorailApiError,
+    KorailAuthError,
+    KorailNoResultsError,
+    KorailPassengerCounts,
+    KorailSeatClass,
+    KorailSessionExpiredError,
+    KorailSoldOutError,
+    KorailSeatUnavailableError,
+    KorailTransportError,
+    TrainSearchQuery,
 )
+
 
 MIN_POLL_INTERVAL_SECONDS = 5
 MAX_SEARCH_NETWORK_RETRIES = 5
@@ -133,12 +136,12 @@ def _no_trains(args: argparse.Namespace) -> int:
 
 
 def _seat_code(train, special: bool) -> str:
-    return train.special_seat if special else train.general_seat
+    return train.special_reservation_code if special else train.general_reservation_code
 
 
 def _pick_train(trains, special: bool, time_to: str, allowed_codes: list[str]):
     for train in trains:
-        if train.dep_time and train.dep_time > time_to:
+        if train.departure_time and train.departure_time > time_to:
             continue
         code = _seat_code(train, special)
         # 예약 허용 코드는 11로 제한합니다.
@@ -148,40 +151,23 @@ def _pick_train(trains, special: bool, time_to: str, allowed_codes: list[str]):
 
 
 def _search_window(client, args: argparse.Namespace, passengers) -> list:
-    """Every train (sold out too) departing on args.date within the time window.
-
-    Pages are fetched by hand so paging stops at --time-to instead of running
-    through the rest of the day.
-    """
+    """Search direct trains, including sold-out ones, within the KST window."""
     requested = datetime.strptime(args.date + args.time_from, "%Y%m%d%H%M%S").replace(tzinfo=KST)
-    # pykorail refuses past departure times; a long poll can outlive --time-from.
     cursor = max(requested, datetime.now(KST))
     if cursor.strftime("%Y%m%d") != args.date or cursor.strftime("%H%M%S") > args.time_to:
         return []
-    found: dict[tuple[str, str, str], object] = {}
-    for _ in range(MAX_SEARCH_PAGES):
-        try:
-            page = client.trains.search(
-                args.dep, args.arr, depart_after=cursor, passengers=passengers, include_no_seats=True,
-            )
-        except NoResultsError:
-            # End of pagination must not discard trains already found.
-            break
-        fresh = {(t.train_no, t.dep_date, t.dep_time): t for t in page}
-        fresh = {key: t for key, t in fresh.items() if key not in found}
-        if not fresh:
-            break
-        found.update(fresh)
-        last = page[-1]
-        if last.dep_date != args.date or last.dep_time > args.time_to:
-            break
-        following = datetime.strptime(last.dep_date + last.dep_time, "%Y%m%d%H%M%S").replace(tzinfo=KST)
-        if following <= cursor:
-            break
-        cursor = following
+    query = TrainSearchQuery(
+        args.dep, args.arr, args.date, cursor.strftime("%H%M%S"),
+        passengers=passengers.adult, include_srt=False, include_nearby_stations=False,
+    )
+    try:
+        trains = client.search_trains_all(query, max_time=args.time_to, max_pages=MAX_SEARCH_PAGES)
+    except KorailNoResultsError:
+        return []
     return [
-        train for train in found.values()
-        if train.dep_date == args.date and args.time_from <= train.dep_time <= args.time_to
+        train for train in trains
+        if train.departure_date == args.date and train.departure_time
+        and cursor.strftime("%H%M%S") <= train.departure_time <= args.time_to
     ]
 
 
@@ -227,14 +213,14 @@ def _run(args: argparse.Namespace) -> int:
     args.poll_interval = max(args.poll_interval, MIN_POLL_INTERVAL_SECONDS)
     member_id, password = load_credentials(args.id)
     special = args.seat_class == "special"
-    passengers = [AdultPassenger(args.adults)]
+    passengers = KorailPassengerCounts(adult=args.adults)
 
     _prevent_sleep()
     client = build_client()
     try:
         try:
             client.login(member_id, password)
-        except LoginFailedError as exc:
+        except KorailAuthError as exc:
             print(f"Login failed: {exc}")
             return 1
         print("Login succeeded. Searching...")
@@ -266,20 +252,21 @@ def _run(args: argparse.Namespace) -> int:
                         print(f"Search returned {len(candidates)} trains. First 20 statuses:")
                         for train in candidates[:20]:
                             print(
-                                f"  {train.train_no} dep={train.dep_time} "
-                                f"general={train.general_seat!r} "
-                                f"special={train.special_seat!r} "
-                                f"status={train.reserve_possible_name!r}"
+                                f"  {train.train_no} dep={train.departure_time} "
+                                f"general={train.general_reservation_code!r} "
+                                f"special={train.special_reservation_code!r} "
+                                f"status={train.general_reservation_flag!r}"
                             )
-                except PastDepartureError:
-                    return _no_trains(args)
-                except NeedToLoginError:
+                except KorailSessionExpiredError:
                     print("Session expired mid-poll, logging back in...")
                     client.login(member_id, password)
                     continue
-                except OSError as exc:
-                    # Retry only network failures during reads (curl_cffi errors are
-                    # OSErrors). HTTP error responses and reservations are never retried.
+                except (KorailTransportError, OSError) as exc:
+                    # Respect the SDK circuit breaker; do not retry during cooldown.
+                    if getattr(exc, "next_probe_at", None) is not None:
+                        print("Search stopped: SDK cooldown is active; try again after the server recovery time.")
+                        raise
+                    # Retry only failed reads, never ambiguous reservations.
                     network_failures += 1
                     last_network_error = exc
                     remaining = deadline - time.monotonic()
@@ -299,7 +286,7 @@ def _run(args: argparse.Namespace) -> int:
                     )
                     time.sleep(delay)
                     continue
-                except PykorailError as exc:
+                except KorailApiError as exc:
                     print(
                         f"Search stopped: {type(exc).__name__}, "
                         f"code={getattr(exc, 'code', None)!r}: {exc}. This is not a no-seat result."
@@ -312,29 +299,29 @@ def _run(args: argparse.Namespace) -> int:
                 continue
 
             print(
-                f"Found train {found.train_no}, departs {found.dep_time}, "
-                f"arrives {found.arr_time} - attempting reservation."
+                f"Found train {found.train_no}, departs {found.departure_time}, "
+                f"arrives {found.arrival_time} - attempting reservation."
             )
 
             if not args.live:
-                # pykorail's reservations.create() sends immediately, so this
+                # The SDK's reserve() sends immediately, so this
                 # script's own --live flag is the only dry-run guarantee.
                 print("\nDRY RUN — nothing was sent to KORAIL. Preview:")
-                print(f"  train: {found.train_no}, departs {found.dep_time}, arrives {found.arr_time}")
+                print(f"  train: {found.train_no}, departs {found.departure_time}, arrives {found.arrival_time}")
                 print(f"  seat class: {args.seat_class}, reservation code: {_seat_code(found, special)}")
-                print(f"  status: {found.reserve_possible_name}")
+                print(f"  status: {found.special_availability_name if special else found.general_availability_name}")
                 print("Re-run with --live to actually place this reservation.")
-                _ui_result("preview", route=_route(args), departure=_hhmm(found.dep_time))
+                _ui_result("preview", route=_route(args), departure=_hhmm(found.departure_time))
                 return 0
 
             try:
-                hold = client.reservations.create(
+                hold = client.reserve(
                     found,
                     passengers=passengers,
-                    option=ReserveOption.SPECIAL_ONLY if special else ReserveOption.GENERAL_ONLY,
+                    seat_class=KorailSeatClass.SPECIAL if special else KorailSeatClass.GENERAL,
                 )
                 break
-            except SoldOutError as exc:
+            except (KorailSoldOutError, KorailSeatUnavailableError) as exc:
                 # The listing can still show a seat that is gone by the time the
                 # reservation lands (IRT010110 "잔여석없음").
                 print(f"Seat vanished before the reservation went through ({exc}); resuming search...")
@@ -358,33 +345,34 @@ def _run(args: argparse.Namespace) -> int:
             return 1
 
         print("\nReservation placed (not paid yet):")
-        print(f"  PNR: {hold.rsv_id}")
-        print(f"  total fare: {hold.price}")
-        print(f"  payment deadline: {hold.buy_limit_date} {hold.buy_limit_time}")
+        print(f"  PNR: {hold.pnr_no}")
+        fare = hold.total_price or hold.total_fare or "코레일 앱에서 확인"
+        print(f"  total fare: {fare}")
+        print(f"  payment deadline: {hold.payment_deadline_date} {hold.payment_deadline_time}")
         print("\nGo pay for it in the KORAIL app/site before the deadline, or it will auto-cancel.")
-        deadline_date = hold.buy_limit_date or ""
-        deadline_time = hold.buy_limit_time or ""
+        deadline_date = hold.payment_deadline_date or ""
+        deadline_time = hold.payment_deadline_time or ""
         deadline_label = (
             f"{deadline_date[4:6]}/{deadline_date[6:8]} {_hhmm(deadline_time)} (한국시간)"
             if len(deadline_date) == 8 and len(deadline_time) >= 4
             else "코레일 앱에서 확인하세요"
         )
         _ui_result(
-            "reserved", route=_route(args), departure=_hhmm(found.dep_time),
-            train=found.train_no, deadline=deadline_label, fare=str(hold.price),
+            "reserved", route=_route(args), departure=_hhmm(found.departure_time),
+            train=found.train_no, deadline=deadline_label, fare=str(fare),
         )
         launch_alert({
-            "route": _route(args), "departure": _hhmm(found.dep_time),
+            "route": _route(args), "departure": _hhmm(found.departure_time),
             "deadline": deadline_label,
         })
         notified = notify(
-            f"✅ 예약 성공 · 결제 필요 | {args.dep}→{args.arr} {_hhmm(found.dep_time)}",
+            f"✅ 예약 성공 · 결제 필요 | {args.dep}→{args.arr} {_hhmm(found.departure_time)}",
             f"⏰ 결제 마감: {deadline_label}\n"
             "지금 코레일 앱에서 예약 내역을 열고 결제하세요.\n"
             "현재 미결제 예약입니다. 기한 내 결제하지 않으면 자동 취소됩니다.\n\n"
             f"{_route(args)} 열차 {found.train_no}\n"
-            f"{_hhmm(found.dep_time)} 출발 → {_hhmm(found.arr_time)} 도착 · 성인 {args.adults}명\n"
-            f"예약번호: {hold.rsv_id}",
+            f"{_hhmm(found.departure_time)} 출발 → {_hhmm(found.arrival_time)} 도착 · 성인 {args.adults}명\n"
+            f"예약번호: {hold.pnr_no}",
             priority=PRIORITY_URGENT,
             tags=["tada", "train"],
         )
@@ -394,7 +382,7 @@ def _run(args: argparse.Namespace) -> int:
     finally:
         try:
             client.logout()
-        except (PykorailError, OSError):
+        except (KorailApiError, OSError):
             pass
         client.close()
 

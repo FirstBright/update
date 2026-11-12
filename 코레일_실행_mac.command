@@ -25,7 +25,7 @@ find_python() {
         /opt/homebrew/bin/python3 /usr/local/bin/python3 \
         "$(command -v python3 2>/dev/null)"; do
         [ -x "$candidate" ] || continue
-        # pykorail needs Python 3.11+.
+        # korail-api needs Python 3.11+.
         if "$candidate" -c 'import sys; sys.exit(sys.version_info < (3, 11))' 2>/dev/null; then
             PYCMD="$candidate"
             return 0

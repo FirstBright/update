@@ -1,6 +1,6 @@
 # Korail app
 
-Windows Streamlit app using [`pykorail`](https://github.com/devgyurak/pykorail).
+Windows Streamlit app using [`korail-api`](https://github.com/sontheo/KORAIL-py-SDK).
 Source repository: https://github.com/FirstBright/update
 
 ## For users
@@ -66,3 +66,12 @@ Folders containing `.git` (the maintainer's working copy) skip the automatic
 update so unpublished edits are never overwritten.
 
 No GitHub account, Git installation, or API key is needed to update.
+
+## SDK integration
+
+The SDK is installed from the reviewed GitHub commit pinned in `requirements.txt`
+(no Git installation needed). Login, paginated direct-train search, and unpaid
+reservations use `korail_api`. Dry runs never submit reservations; only seat code
+`11` in the selected cabin is eligible. SDK maintenance/cooldown errors stop the
+run instead of being treated as sold-out trains. Ambiguous reservation failures
+are not retried. Live service acceptance has not been verified.

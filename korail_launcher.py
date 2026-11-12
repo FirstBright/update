@@ -52,11 +52,9 @@ def main() -> int:
     try:
         with update_lock(ROOT):
             if not sync_packages():
-                try:
-                    import streamlit  # noqa: F401
-                except ImportError:
-                    return 1
-                print("기존에 설치된 패키지로 실행합니다.")
+                # An older Streamlit installation does not imply the new SDK is present.
+                # Starting anyway hides the install failure behind an import traceback.
+                return 1
             skip_streamlit_email_prompt()
             print()
             print("프로그램을 실행합니다. 잠시 후 브라우저 창이 열립니다...")

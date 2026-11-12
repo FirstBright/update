@@ -7,8 +7,9 @@ import os
 import re
 from pathlib import Path
 
-import pykorail.transport
-from pykorail import Korail
+import certifi
+from dataclasses import replace
+from korail_api import KorailClient, KorailConfig
 
 CREDENTIALS_FILE = Path(__file__).parent / "korail_credentials.txt"
 # Shared by everyone the maintainer sends the zip to (Telegram bot token); never in git.
@@ -18,17 +19,14 @@ NEW_FILE_HEADER = (
     "# Keep this file private: anyone who can read it can log into your KORAIL account.",
 )
 
-_resolve_ca_bundle = pykorail.transport.resolve_ca_bundle
-
-
 def _ascii_ca_bundle() -> str | None:
-    """pykorail's CA bundle, copied to an ASCII-only path if needed.
+    """CA bundle, copied to an ASCII-only path if needed.
 
     libcurl (curl_cffi) on Windows can't open a CA file whose path has non-ASCII
     characters, e.g. an app folder under "바탕 화면": every HTTPS request then
     fails with curl error 77.
     """
-    ca_path = _resolve_ca_bundle()
+    ca_path = os.environ.get("REQUESTS_CA_BUNDLE") or os.environ.get("CURL_CA_BUNDLE") or certifi.where()
     if ca_path is None or ca_path.isascii():
         return ca_path
     data = Path(ca_path).read_bytes()
@@ -48,17 +46,20 @@ def _ascii_ca_bundle() -> str | None:
     return ca_path
 
 
-pykorail.transport.resolve_ca_bundle = _ascii_ca_bundle
-
-
-def build_client() -> Korail:
+def build_client() -> KorailClient:
     """Create a client, optionally pinning the device's Android ID (16 hex chars)."""
     device_id = os.environ.get("KORAIL_DYNAPATH_DEVICE_ID")
-    if device_id is None:
-        return Korail()
-    if not re.fullmatch(r"[0-9a-fA-F]{16}", device_id):
+    if device_id is not None and not re.fullmatch(r"[0-9a-fA-F]{16}", device_id):
         raise ValueError("KORAIL_DYNAPATH_DEVICE_ID must contain exactly 16 hex characters")
-    return Korail(android_id=device_id.lower())
+    config = KorailConfig()
+    if device_id is not None:
+        provider = replace(config.dynapath.token_provider, device_id=device_id.lower())
+        config = replace(config, dynapath=replace(config.dynapath, token_provider=provider))
+    ca_path = _ascii_ca_bundle()
+    if ca_path:
+        # curl_cffi honors this even when proxy trust_env is disabled.
+        os.environ["REQUESTS_CA_BUNDLE"] = ca_path
+    return KorailClient(config)
 
 
 def _load_file(path: Path | None = None) -> dict[str, str]:
